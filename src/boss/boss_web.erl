@@ -7,6 +7,7 @@
         get_all_routes/0,
         get_all_models/0,
         get_all_applications/0,
+        get_all_application_infos/0,
         base_url/1,
         domains/1,
         static_prefix/1,
@@ -34,6 +35,9 @@ get_all_models() ->
 
 get_all_applications() ->
     gen_server:call(boss_web, get_all_applications).
+
+get_all_application_infos() ->
+    gen_server:call(boss_web, get_all_application_infos).
 
 base_url(App) ->
     gen_server:call(boss_web, {base_url, App}).

@@ -244,88 +244,46 @@ handle_info(timeout, State) ->
     {noreply, State#state{ applications = AppInfoList }}.
 
 handle_call({reload_translation, Locale}, _From, State) ->
-    lists:map(fun(AppInfo) ->
-                [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
-                boss_translator:reload(TranslatorPid, Locale)
-        end, State#state.applications),
+    reload_translation(State#state.applications, Locale),
     {reply, ok, State};
 handle_call(reload_all_translations, _From, State) ->
-    lists:map(fun(AppInfo) ->
-                [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
-                boss_translator:reload_all(TranslatorPid)
-        end, State#state.applications),
+    reload_all_translations(State#state.applications),
     {reply, ok, State};
 handle_call(reload_routes, _From, State) ->
-    lists:map(fun(AppInfo) ->
-                [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
-                boss_router:reload(RouterPid)
-        end, State#state.applications),
+    reload_routes(State#state.applications),
     {reply, ok, State};
 handle_call(reload_init_scripts, _From, State) ->
-    NewApplications = lists:map(fun(AppInfo) ->
-                stop_init_scripts(AppInfo#boss_app_info.application, AppInfo#boss_app_info.init_data),
-                NewInitData = run_init_scripts(AppInfo#boss_app_info.application),
-                AppInfo#boss_app_info{ init_data = NewInitData }
-        end, State#state.applications),
+    NewApplications = reload_init_scripts(State#state.applications),
     {reply, ok, State#state{ applications = NewApplications }};
 handle_call(get_all_routes, _From, State) ->
-    Routes = lists:map(fun(AppInfo) ->
-                [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
-                {AppInfo#boss_app_info.application, boss_router:get_all(RouterPid)}
-        end, State#state.applications),
+    Routes = get_all_routes(State#state.applications),
     {reply, Routes, State};
 handle_call(get_all_models, _From, State) ->
-    Models = lists:foldl(fun(AppInfo, Acc) ->
-                boss_files:model_list(AppInfo#boss_app_info.application) ++ Acc
-        end, [], State#state.applications),
+    Models = get_all_models(State#state.applications),
     {reply, Models, State};
 handle_call(get_all_applications, _From, State) ->
-    Applications = lists:map(fun(AppInfo) -> AppInfo#boss_app_info.application end, State#state.applications),
+    Applications = get_all_application_names(State#state.applications),
     {reply, Applications, State};
 handle_call({translator_pid, App}, _From, State) ->
-    Pid = lists:foldl(fun
-            (#boss_app_info{ application = App1, translator_sup_pid = SupPid }, _) when App1 =:= App ->
-                [{_, TranslatorPid, _, _}] = supervisor:which_children(SupPid),
-                TranslatorPid;
-            (_, Res) ->
-                Res
-        end, undefined, State#state.applications),
+    Pid = get_translator_pid(State#state.applications, App),
     {reply, Pid, State};
 handle_call({router_pid, App}, _From, State) ->
-    Pid = lists:foldl(fun
-            (#boss_app_info{ application = App1, router_sup_pid = SupPid }, _) when App1 =:= App ->
-                [{_, RouterPid, _, _}] = supervisor:which_children(SupPid),
-                RouterPid;
-            (_, Res) ->
-                Res
-        end, undefined, State#state.applications),
+    Pid = get_router_pid(State#state.applications, App),
     {reply, Pid, State};
+handle_call(get_all_application_infos, _From, State) ->
+    AppInfos = get_all_application_infos(State#state.applications),
+    {reply, AppInfos, State};
 handle_call({application_info, App}, _From, State) ->
     AppInfo = lists:keyfind(App, 2, State#state.applications),
     {reply, AppInfo, State};
 handle_call({base_url, App}, _From, State) ->
-    BaseURL = lists:foldl(fun
-            (#boss_app_info{ application = App1, base_url = URL }, _) when App1 =:= App ->
-                URL;
-            (_, Res) ->
-                Res
-        end, "", State#state.applications),
+    BaseURL = get_base_url(State#state.applications, App),
     {reply, BaseURL, State};
 handle_call({static_prefix, App}, _From, State) ->
-    StaticPrefix = lists:foldl(fun
-            (#boss_app_info{ application = App1, static_prefix = Prefix }, _) when App1 =:= App ->
-                Prefix;
-            (_, Res) ->
-                Res
-        end, "/static", State#state.applications),
+    StaticPrefix = get_static_prefix(State#state.applications, App),
     {reply, StaticPrefix, State};
 handle_call({domains, App}, _From, State) ->
-    DomainList = lists:foldl(fun
-            (#boss_app_info{ application = App1, domains = Domains}, _) when App1 =:= App ->
-                Domains;
-            (_, Res) ->
-                Res
-        end, all, State#state.applications),
+    DomainList = get_domains(State#state.applications, App),
     {reply, DomainList, State}.
 
 handle_cast(_Request, State) ->
@@ -334,35 +292,121 @@ handle_cast(_Request, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-find_application_for_path(Host, Path, Applications) ->
+reload_translation(AppInfos, Locale) ->
+    lists:map(fun(AppInfo) ->
+                      [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
+                      boss_translator:reload(TranslatorPid, Locale)
+              end, AppInfos).
+
+reload_all_translations(AppInfos) ->
+    lists:map(fun(AppInfo) ->
+                      [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
+                      boss_translator:reload_all(TranslatorPid)
+              end, AppInfos).
+
+reload_routes(AppInfos) ->
+    lists:map(fun(AppInfo) ->
+                      [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
+                      boss_router:reload(RouterPid)
+              end, AppInfos).
+
+reload_init_scripts(AppInfos) ->
+    lists:map(fun(AppInfo) ->
+                      stop_init_scripts(AppInfo#boss_app_info.application, AppInfo#boss_app_info.init_data),
+                      NewInitData = run_init_scripts(AppInfo#boss_app_info.application),
+                      AppInfo#boss_app_info{ init_data = NewInitData }
+              end, AppInfos).
+
+get_all_routes(AppInfos) ->
+    lists:map(fun(AppInfo) ->
+                      [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
+                      {AppInfo#boss_app_info.application, boss_router:get_all(RouterPid)}
+              end, AppInfos).
+
+get_all_models(AppInfos) ->
+    lists:foldl(fun(AppInfo, Acc) ->
+                        boss_files:model_list(AppInfo#boss_app_info.application) ++ Acc
+                end, [], AppInfos).
+
+get_all_application_names(AppInfos) ->
+    lists:map(fun(AppInfo) -> AppInfo#boss_app_info.application end, AppInfos).
+
+get_translator_pid(AppInfos, App) ->
+    lists:foldl(fun
+                    (#boss_app_info{ application = App1, translator_sup_pid = SupPid }, _) when App1 =:= App ->
+                        [{_, TranslatorPid, _, _}] = supervisor:which_children(SupPid),
+                        TranslatorPid;
+                    (_, Res) ->
+                        Res
+                end, undefined, AppInfos).
+
+get_router_pid(AppInfos, App) ->
+    lists:foldl(fun
+                    (#boss_app_info{ application = App1, router_sup_pid = SupPid }, _) when App1 =:= App ->
+                        [{_, RouterPid, _, _}] = supervisor:which_children(SupPid),
+                        RouterPid;
+                    (_, Res) ->
+                        Res
+                end, undefined, AppInfos).
+
+%% Filter out unwanted fields
+get_all_application_infos(AppInfos) ->
+    lists:map(fun(AppInfo) -> AppInfo#boss_app_info{ init_data = undefined } end, AppInfos).
+
+get_base_url(AppInfos, App) ->
+    lists:foldl(fun
+                    (#boss_app_info{ application = App1, base_url = URL }, _) when App1 =:= App ->
+                        URL;
+                    (_, Res) ->
+                        Res
+                end, "", AppInfos).
+
+get_static_prefix(AppInfos, App) ->
+    lists:foldl(fun
+                    (#boss_app_info{ application = App1, static_prefix = Prefix }, _) when App1 =:= App ->
+                        Prefix;
+                    (_, Res) ->
+                        Res
+                end, "/static", AppInfos).
+
+get_domains(AppInfos, App) ->
+    lists:foldl(fun
+                    (#boss_app_info{ application = App1, domains = Domains}, _) when App1 =:= App ->
+                        Domains;
+                    (_, Res) ->
+                        Res
+                end, all, AppInfos).
+
+find_application_for_path(Host, Path, AppInfos) ->
     UseHost = case Host of
         undefined -> undefined;
         _ -> hd(re:split(Host, ":", [{return, list}]))
     end,
-    find_application_for_path(UseHost, Path, undefined, Applications, -1).
+    find_application_for_path(UseHost, Path, undefined, AppInfos, -1).
 
 find_application_for_path(_Host, _Path, Default, [], _MatchScore) ->
     Default;
-find_application_for_path(Host, Path, Default, [App|Rest], MatchScore) ->
+find_application_for_path(Host, Path, Default,
+                          [#boss_app_info{ base_url = BaseURL, domains = Domains }=AppInfo|Rest],
+                          MatchScore) ->
     DomainScore = case Host of
         undefined -> 0;
         _ ->
-            case boss_web:domains(App) of
+            case Domains of
                 all -> 0;
-                Domains ->
+                _ ->
                     case lists:member(Host, Domains) of
                         true -> 1;
                         false -> -1
                     end
             end
     end,
-    BaseURL = boss_web:base_url(App),
     PathScore = length(BaseURL),
-    {UseApp, UseScore} = case (DomainScore >= 0) andalso (1000 * DomainScore + PathScore > MatchScore) andalso lists:prefix(BaseURL, Path) of
-        true -> {App, DomainScore * 1000 + PathScore};
+    {UseAppInfo, UseScore} = case (DomainScore >= 0) andalso (1000 * DomainScore + PathScore > MatchScore) andalso lists:prefix(BaseURL, Path) of
+        true -> {AppInfo, DomainScore * 1000 + PathScore};
         false -> {Default, MatchScore}
     end,
-    find_application_for_path(Host, Path, UseApp, Rest, UseScore).
+    find_application_for_path(Host, Path, UseAppInfo, Rest, UseScore).
 
 stop_init_scripts(Application, InitData) ->
     lists:foldr(fun(File, _) ->
@@ -398,18 +442,16 @@ run_init_scripts(AppName) ->
         end, [], boss_files:init_file_list(AppName)).
 
 handle_request(Req, RequestMod, ResponseMod) ->
-    LoadedApplications = boss_web:get_all_applications(),
+    AppInfos = boss_web:get_all_application_infos(),
     Request = simple_bridge:make_request(RequestMod, Req),
     FullUrl = Request:path(),
-    case find_application_for_path(Request:header(host), FullUrl, LoadedApplications) of
+    case find_application_for_path(Request:header(host), FullUrl, AppInfos) of
         undefined ->
             Response = simple_bridge:make_response(ResponseMod, {Req, undefined}),
             Response1 = (Response:status_code(404)):data(["No application configured at this URL"]),
             Response1:build_response();
-        App ->
-            BaseURL = boss_web:base_url(App),
+        #boss_app_info{ application = App, base_url = BaseURL, static_prefix = StaticPrefix } = AppInfo ->
             DocRoot = boss_files:static_path(App),
-            StaticPrefix = boss_web:static_prefix(App),
             Url = lists:nthtail(length(BaseURL), FullUrl),
             Response = simple_bridge:make_response(ResponseMod, {Req, DocRoot}),
             case Url of
@@ -421,12 +463,12 @@ handle_request(Req, RequestMod, ResponseMod) ->
                             [$/|File] = lists:nthtail(length(StaticPrefix), Url),
                             (Response:file([$/|File])):build_response();
                         _ ->
-                            build_dynamic_response(App, Request, Response, Url)
+                            build_dynamic_response(AppInfo, Request, Response, Url)
                     end
             end
     end.
 
-build_dynamic_response(App, Request, Response, Url) ->
+build_dynamic_response(AppInfo, Request, Response, Url) ->
     SessionKey = boss_session:get_session_key(),
     SessionID = case boss_env:get_env(session_enable, true) of
         true ->
@@ -434,15 +476,15 @@ build_dynamic_response(App, Request, Response, Url) ->
         false ->
             undefined
     end,
+    App = AppInfo#boss_app_info.application,
     Mode = case boss_env:is_developing_app(App) of
         true -> development;
         false -> production
     end,
-    AppInfo = boss_web:application_info(App),
-    TranslatorPid = boss_web:translator_pid(App),
-    RouterPid = boss_web:router_pid(App),
+    [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
+    [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
     {Time, {StatusCode, Headers, Payload}} = timer:tc(?MODULE, process_request, [
-            AppInfo#boss_app_info{ translator_pid = TranslatorPid, router_pid = RouterPid }, 
+            AppInfo#boss_app_info{ translator_pid = TranslatorPid, router_pid = RouterPid },
             Request, Mode, Url, SessionID]),
     ErrorFormat = "~s ~s [~p] ~p ~pms~n", 
     RequestMethod = Request:request_method(),
