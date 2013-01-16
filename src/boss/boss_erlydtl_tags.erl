@@ -32,7 +32,7 @@ url(Variables, Options) ->
     ProtocolPlusDomain = case ThisApp =:= LinkedApp of
         true -> "";
         false ->
-            case boss_web:domains(list_to_atom(lists:concat([LinkedApp]))) of
+            case boss_application:domains(list_to_atom(lists:concat([LinkedApp]))) of
                 all -> "";
                 Domains -> 
                     UseSameDomain = case proplists:get_value(host, Options) of
@@ -50,5 +50,5 @@ url(Variables, Options) ->
 
     RouterPid = proplists:get_value(router_pid, Options),
     URL = boss_router:unroute(RouterPid, LinkedController, Action, NoUndefinedVars),
-    BaseURL = boss_web:base_url(list_to_atom(lists:concat([LinkedApp]))),
+    BaseURL = boss_application:base_url(list_to_atom(lists:concat([LinkedApp]))),
     ProtocolPlusDomain ++ BaseURL ++ URL.

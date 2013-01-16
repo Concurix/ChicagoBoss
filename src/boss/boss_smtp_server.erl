@@ -51,7 +51,7 @@ handle_MAIL(FromAddress, State) ->
                             false ->
                                 Acc
                         end
-                end, [], boss_web:get_all_applications()),
+                end, [], boss_application:get_all_applications()),
             case Authorize of
                 [] -> {error, "552 go away", State};
                 _ -> {ok, State#state{ authorized_apps = Authorize }}

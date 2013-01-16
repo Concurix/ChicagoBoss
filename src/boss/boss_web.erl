@@ -1,58 +1,60 @@
 -module(boss_web).
 
--export([reload_routes/0,
-        reload_translation/1,
-        reload_all_translations/0,
-        reload_init_scripts/0,
-        get_all_routes/0,
-        get_all_models/0,
-        get_all_applications/0,
-        get_all_application_infos/0,
-        base_url/1,
-        domains/1,
-        static_prefix/1,
-        translator_pid/1,
-        router_pid/1,
-        application_info/1]).
+%% -export([reload_routes/0,
+%%         reload_translation/1,
+%%         reload_all_translations/0,
+%%         reload_init_scripts/0,
+%%         get_all_routes/0,
+%%         get_all_models/0,
+%%         get_all_applications/0,
+%%         get_all_application_infos/0,
+%%         base_url/1,
+%%         domains/1,
+%%         static_prefix/1,
+%%         translator_pid/1,
+%%         router_pid/1,
+%%         application_info/1]).
 
-reload_routes() ->
-    gen_server:call(boss_web, reload_routes).
+%% Functions moved to boss_application module.
 
-reload_translation(Locale) ->
-    gen_server:call(boss_web, {reload_translation, Locale}).
+%% reload_routes() ->
+%%     gen_server:call(boss_web, reload_routes).
 
-reload_all_translations() ->
-    gen_server:call(boss_web, reload_all_translations).
+%% reload_translation(Locale) ->
+%%     gen_server:call(boss_web, {reload_translation, Locale}).
 
-reload_init_scripts() ->
-    gen_server:call(boss_web, reload_init_scripts).
+%% reload_all_translations() ->
+%%     gen_server:call(boss_web, reload_all_translations).
 
-get_all_routes() ->
-    gen_server:call(boss_web, get_all_routes).
+%% reload_init_scripts() ->
+%%     gen_server:call(boss_web, reload_init_scripts).
 
-get_all_models() ->
-    gen_server:call(boss_web, get_all_models).
+%% get_all_routes() ->
+%%     gen_server:call(boss_web, get_all_routes).
 
-get_all_applications() ->
-    gen_server:call(boss_web, get_all_applications).
+%% get_all_models() ->
+%%     gen_server:call(boss_web, get_all_models).
 
-get_all_application_infos() ->
-    gen_server:call(boss_web, get_all_application_infos).
+%% get_all_applications() ->
+%%     gen_server:call(boss_web, get_all_applications).
 
-base_url(App) ->
-    gen_server:call(boss_web, {base_url, App}).
+%% get_all_application_infos() ->
+%%     gen_server:call(boss_web, get_all_application_infos).
 
-domains(App) ->
-    gen_server:call(boss_web, {domains, App}).
+%% base_url(App) ->
+%%     gen_server:call(boss_web, {base_url, App}).
 
-static_prefix(App) ->
-    gen_server:call(boss_web, {static_prefix, App}).
+%% domains(App) ->
+%%     gen_server:call(boss_web, {domains, App}).
 
-translator_pid(AppName) ->
-    gen_server:call(boss_web, {translator_pid, AppName}).
+%% static_prefix(App) ->
+%%     gen_server:call(boss_web, {static_prefix, App}).
 
-router_pid(AppName) ->
-    gen_server:call(boss_web, {router_pid, AppName}).
+%% translator_pid(AppName) ->
+%%     gen_server:call(boss_web, {translator_pid, AppName}).
 
-application_info(App) ->
-    gen_server:call(boss_web, {application_info, App}).
+%% router_pid(AppName) ->
+%%     gen_server:call(boss_web, {router_pid, AppName}).
+
+%% application_info(App) ->
+%%     gen_server:call(boss_web, {application_info, App}).

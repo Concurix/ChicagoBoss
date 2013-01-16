@@ -198,8 +198,8 @@ reload_cmd(_RebarConf, BossConf, AppFile) ->
         SName ->
             CookieOpt = cookie_option(BossConf),
             ReloadCode = io_lib:format("rpc:call('~s', boss_load, reload_all, [])", [SName]),
-            ReloadRoutes = io_lib:format("rpc:call('~s', boss_web, reload_routes, [])", [SName]),
-            ReloadLangs = io_lib:format("rpc:call('~s', boss_web, reload_all_translations, [])", [SName]),
+            ReloadRoutes = io_lib:format("rpc:call('~s', boss_application, reload_routes, [])", [SName]),
+            ReloadLangs = io_lib:format("rpc:call('~s', boss_application, reload_all_translations, [])", [SName]),
             io:format("erl -noshell -pa ebin ~s -sname reloader_~s -eval \"~s, ~s, ~s.\" -s init stop", 
                 [CookieOpt, SName, ReloadCode, ReloadRoutes, ReloadLangs])
     end,
