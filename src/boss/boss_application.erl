@@ -2,10 +2,10 @@
 
 -module(boss_application).
 
--export([start/0, start/1, stop/0]).
 -export([reload_routes/0, reload_translation/1, reload_all_translations/0,
          reload_init_scripts/0, get_all_routes/0, get_all_models/0, get_all_applications/0,
-         get_all_application_infos/0, base_url/1, domains/1, static_prefix/1, 
+         set_application_infos/1, get_all_application_infos/0,
+         base_url/1, domains/1, static_prefix/1, 
          translator_pid/1, router_pid/1, application_info/1,
          reload_translation/2, reload_all_translations/1, reload_routes/1, reload_init_scripts/1,
          get_all_routes/1, get_all_models/1, get_all_application_names/1,
@@ -16,89 +16,85 @@
 
 -include("boss_web.hrl").
 
-start() ->
-    start([]).
-
-start(AppInfos) ->
-    boss_application_sup:start_link(AppInfos).
-
-stop() ->
-    ok.
-
 %% Calls that require access to web controller state and are performed on
 %% poolboy workers.
 
 %% @spec reload_routes() -> [ok]
 %% @doc Reloads all routes known to the web controller.
 reload_routes() ->
-    boss_pool:call(?POOLNAME, reload_routes).
+    reload_routes(get_all_application_infos()).
 
 %% @spec reload_translation(string()) -> ok
 %% @doc Reloads the translation for the specified locale.
 reload_translation(Locale) ->
-    boss_pool:call(?POOLNAME, {reload_translation, Locale}).
+    reload_translation(get_all_application_infos(), Locale).
 
 %% @spec reload_all_translations() -> [ok]
 %% @doc Reloads all translations known to the web controller.
 reload_all_translations() ->
-    boss_pool:call(?POOLNAME, reload_all_translations).
+    reload_all_translations(get_all_application_infos()).
 
 %% @spec reload_init_scripts() -> [#boss_app_info{}]
 %% @doc Runs all init scripts and returns a list of
 %% application infos with init_data updated to the results
 %% of the runs.
 reload_init_scripts() ->
-    boss_pool:call(?POOLNAME, reload_init_scripts).
+    reload_init_scripts(get_all_application_infos()).
 
 %% @spec get_all_routes() -> list()
 %% @doc Returns all routes known to the web controller.
 get_all_routes() ->
-    boss_pool:call(?POOLNAME, get_all_routes).
+    get_all_routes(get_all_application_infos()).
 
 %% @spec get_all_models() -> list()
 %% @doc Returns all models known to the web controller.
 get_all_models() ->
-    boss_pool:call(?POOLNAME, get_all_models).
+    get_all_models(get_all_application_infos()).
 
 %% @spec get_all_applications() -> [string()]
 %% @doc Returns the names of all applications known to the web controller.
 get_all_applications() ->
-    boss_pool:call(?POOLNAME, get_all_applications).
+    get_all_application_names(get_all_application_infos()).
+
+%% @spec set_application_infos([#boss_app_info{}]) -> ok
+%% @doc Store application info using mochiglobal.
+set_application_infos(AppInfos) ->
+    mochiglobal:put(boss_application_infos, AppInfos).
 
 %% @spec get_all_application_infos() -> [#boss_app_info{}]
-%% @doc Returns the full set of application infos from the web controller.
+%% @doc Returns the full set of application infos from mochiglobal.
 get_all_application_infos() ->
-    boss_pool:call(?POOLNAME, get_all_application_infos).
+    mochiglobal:get(boss_application_infos, []).
 
 %% @spec base_url(App::string()) -> string() | ""
 %% @doc Returns the base URL for the named application.
 base_url(App) ->
-    boss_pool:call(?POOLNAME, {base_url, App}).
+    get_base_url(get_all_application_infos(), App).
 
 %% @spec domains(App::string()) -> [string()] | all
 %% @doc Returns the list of domains for the named application.
 domains(App) ->
-    boss_pool:call(?POOLNAME, {domains, App}).
+    get_domains(get_all_application_infos(), App).
 
 %% @spec static_prefix(App::string()) -> string() | "/static"
 %% @doc Returns the static prefix for the named application.
 static_prefix(App) ->
-    boss_pool:call(?POOLNAME, {static_prefix, App}).
+    get_static_prefix(get_all_application_infos(), App).
 
 %% @spec translator_pid(App::string()) -> pid() | undefined
 %% @doc Returns the translator pid for the named application.
 translator_pid(App) ->
-    boss_pool:call(?POOLNAME, {translator_pid, App}).
+    get_translator_pid(get_all_application_infos(), App).
 
 %% @spec router_pid(App::string()) -> pid() | undefined
 %% @doc Returns the router pid for the named application.
 router_pid(App) ->
-    boss_pool:call(?POOLNAME, {router_pid, App}).
+    get_router_pid(get_all_application_infos(), App).
 
 %% @spec application_info(App::string()) -> #boss_app_info{} | false
 %% @doc Returns the complete application info for the named application.
 application_info(App) ->
-    boss_pool:call(?POOLNAME, {application_info, App}).
+    lists:keyfind(App, 2, get_all_application_infos()).
 
 
 %% Calls that depend only on their input arguments and are performed
@@ -122,12 +118,15 @@ reload_routes(AppInfos) ->
                       boss_router:reload(RouterPid)
               end, AppInfos).
 
+%% Reloading init scripts changes the stored application state.
 reload_init_scripts(AppInfos) ->
-    lists:map(fun(AppInfo) ->
-                      boss_web_controller:stop_init_scripts(AppInfo#boss_app_info.application, AppInfo#boss_app_info.init_data),
-                      NewInitData = bos_web_controller:run_init_scripts(AppInfo#boss_app_info.application),
-                      AppInfo#boss_app_info{ init_data = NewInitData }
-              end, AppInfos).
+    NewAppInfos = lists:map(fun(AppInfo) ->
+                                    boss_web_controller:stop_init_scripts(AppInfo#boss_app_info.application, AppInfo#boss_app_info.init_data),
+                                    NewInitData = bos_web_controller:run_init_scripts(AppInfo#boss_app_info.application),
+                                    AppInfo#boss_app_info{ init_data = NewInitData }
+                            end, AppInfos),
+    set_application_infos(NewAppInfos),
+    NewAppInfos.
 
 get_all_routes(AppInfos) ->
     lists:map(fun(AppInfo) ->

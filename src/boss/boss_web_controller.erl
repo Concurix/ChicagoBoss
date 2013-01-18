@@ -41,8 +41,7 @@ terminate(_Reason, State) ->
     boss_db:stop(),
     boss_cache:stop(),
     mochiweb_http:stop(),
-    misultin:stop(),
-    boss_application:stop().
+    misultin:stop().
 
 init(Config) ->
     case boss_env:get_env(log_enable, true) of
@@ -243,7 +242,7 @@ handle_info(timeout, State) ->
 	    _Oops
     end,
 
-    boss_application:start([{applications, AppInfoList}]),
+    boss_application:set_application_infos(AppInfoList),
 
     {noreply, State#state{ applications = AppInfoList }}.
 
