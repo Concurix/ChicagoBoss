@@ -12,8 +12,6 @@
          get_translator_pid/2, get_router_pid/2,
          get_all_application_infos/1, get_base_url/2, get_static_prefix/2, get_domains/2]).
 
--define(POOLNAME, boss_application_pool).
-
 -include("boss_web.hrl").
 
 init(AppInfos) ->
@@ -21,8 +19,7 @@ init(AppInfos) ->
             [set, public, named_table, {read_concurrency, true}]),
     set_application_infos(AppInfos).
 
-%% Calls that require access to web controller state and are performed on
-%% poolboy workers.
+%% Calls that require access to web controller state.
 
 %% @spec reload_routes() -> [ok]
 %% @doc Reloads all routes known to the web controller.
@@ -103,8 +100,7 @@ application_info(App) ->
     lists:keyfind(App, 2, get_all_application_infos()).
 
 
-%% Calls that depend only on their input arguments and are performed
-%% within the calling process itself.
+%% Calls that depend only on their input arguments.
 
 reload_translation(AppInfos, Locale) ->
     lists:map(fun(AppInfo) ->
