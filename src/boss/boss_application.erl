@@ -2,7 +2,7 @@
 
 -module(boss_application).
 
--export([reload_routes/0, reload_translation/1, reload_all_translations/0,
+-export([init/1, reload_routes/0, reload_translation/1, reload_all_translations/0,
          reload_init_scripts/0, get_all_routes/0, get_all_models/0, get_all_applications/0,
          set_application_infos/1, get_all_application_infos/0,
          base_url/1, domains/1, static_prefix/1, 
@@ -15,6 +15,11 @@
 -define(POOLNAME, boss_application_pool).
 
 -include("boss_web.hrl").
+
+init(AppInfos) ->
+    ets:new(boss_application_infos,
+            [set, public, named_table, {read_concurrency, true}]),
+    set_application_infos(AppInfos).
 
 %% Calls that require access to web controller state and are performed on
 %% poolboy workers.
@@ -59,12 +64,13 @@ get_all_applications() ->
 %% @spec set_application_infos([#boss_app_info{}]) -> ok
 %% @doc Store application info using mochiglobal.
 set_application_infos(AppInfos) ->
-    mochiglobal:put(boss_application_infos, AppInfos).
+    ets:insert(boss_application_infos, {only_key, AppInfos}).
 
 %% @spec get_all_application_infos() -> [#boss_app_info{}]
 %% @doc Returns the full set of application infos from mochiglobal.
 get_all_application_infos() ->
-    mochiglobal:get(boss_application_infos, []).
+    [{only_key, AppInfos}] = ets:lookup(boss_application_infos, only_key),
+    AppInfos.
 
 %% @spec base_url(App::string()) -> string() | ""
 %% @doc Returns the base URL for the named application.

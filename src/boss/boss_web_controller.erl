@@ -242,7 +242,7 @@ handle_info(timeout, State) ->
 	    _Oops
     end,
 
-    boss_application:set_application_infos(AppInfoList),
+    boss_application:init(AppInfoList),
 
     {noreply, State#state{ applications = AppInfoList }}.
 
