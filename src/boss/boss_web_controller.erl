@@ -247,49 +247,6 @@ handle_info(timeout, State) ->
 
     {noreply, State#state{ applications = AppInfoList }}.
 
-%% handle_call({reload_translation, Locale}, _From, State) ->
-%%     boss_application:reload_translation(State#state.applications, Locale),
-%%     {reply, ok, State};
-%% handle_call(reload_all_translations, _From, State) ->
-%%     boss_application:reload_all_translations(State#state.applications),
-%%     {reply, ok, State};
-%% handle_call(reload_routes, _From, State) ->
-%%     boss_application:reload_routes(State#state.applications),
-%%     {reply, ok, State};
-%% handle_call(reload_init_scripts, _From, State) ->
-%%     NewApplications = boss_application:reload_init_scripts(State#state.applications),
-%%     {reply, ok, State#state{ applications = NewApplications }};
-%% handle_call(get_all_routes, _From, State) ->
-%%     Routes = boss_application:get_all_routes(State#state.applications),
-%%     {reply, Routes, State};
-%% handle_call(get_all_models, _From, State) ->
-%%     Models = boss_application:get_all_models(State#state.applications),
-%%     {reply, Models, State};
-%% handle_call(get_all_applications, _From, State) ->
-%%     Applications = boss_application:get_all_application_names(State#state.applications),
-%%     {reply, Applications, State};
-%% handle_call({translator_pid, App}, _From, State) ->
-%%     Pid = boss_application:get_translator_pid(State#state.applications, App),
-%%     {reply, Pid, State};
-%% handle_call({router_pid, App}, _From, State) ->
-%%     Pid = boss_application:get_router_pid(State#state.applications, App),
-%%     {reply, Pid, State};
-%% handle_call(get_all_application_infos, _From, State) ->
-%%     AppInfos = boss_application:get_all_application_infos(State#state.applications),
-%%     {reply, AppInfos, State};
-%% handle_call({application_info, App}, _From, State) ->
-%%     AppInfo = lists:keyfind(App, 2, State#state.applications),
-%%     {reply, AppInfo, State};
-%% handle_call({base_url, App}, _From, State) ->
-%%     BaseURL = boss_application:get_base_url(State#state.applications, App),
-%%     {reply, BaseURL, State};
-%% handle_call({static_prefix, App}, _From, State) ->
-%%     StaticPrefix = boss_application:get_static_prefix(State#state.applications, App),
-%%     {reply, StaticPrefix, State};
-%% handle_call({domains, App}, _From, State) ->
-%%     DomainList = boss_application:get_domains(State#state.applications, App),
-%%     {reply, DomainList, State}.
-
 handle_call(_Request, _From, State) ->
     {reply, State}.
 
