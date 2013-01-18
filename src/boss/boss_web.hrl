@@ -3,6 +3,7 @@
         application,
         base_url,
         static_prefix,
+        static_path,
         doc_prefix,
         domains,
         init_data,

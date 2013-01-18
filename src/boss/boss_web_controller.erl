@@ -175,6 +175,7 @@ handle_info(timeout, State) ->
                 application:start(AppName),
                 BaseURL = boss_env:get_env(AppName, base_url, "/"),
                 StaticPrefix = boss_env:get_env(AppName, static_prefix, "/static"),
+                StaticPath = boss_files:static_path(AppName),
                 DocPrefix = boss_env:get_env(AppName, doc_prefix, "/doc"),
                 DomainList = boss_env:get_env(AppName, domains, all),
                 ModelList = boss_files:model_list(AppName),
@@ -207,6 +208,7 @@ handle_info(timeout, State) ->
                     translator_sup_pid = TranslatorSupPid,
                     base_url = (if BaseURL =:= "/" -> ""; true -> BaseURL end),
                     static_prefix = StaticPrefix,
+                    static_path = StaticPath,
                     doc_prefix = DocPrefix,
                     domains = DomainList,
                     model_modules = ModelList,
@@ -328,8 +330,7 @@ handle_request(Req, RequestMod, ResponseMod) ->
             Response = simple_bridge:make_response(ResponseMod, {Req, undefined}),
             Response1 = (Response:status_code(404)):data(["No application configured at this URL"]),
             Response1:build_response();
-        #boss_app_info{ application = App, base_url = BaseURL, static_prefix = StaticPrefix } = AppInfo ->
-            DocRoot = boss_files:static_path(App),
+        #boss_app_info{ base_url = BaseURL, static_prefix = StaticPrefix, static_path = DocRoot } = AppInfo ->
             Url = lists:nthtail(length(BaseURL), FullUrl),
             Response = simple_bridge:make_response(ResponseMod, {Req, DocRoot}),
             case Url of
