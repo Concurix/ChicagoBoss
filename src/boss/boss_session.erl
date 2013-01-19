@@ -7,6 +7,8 @@
 -export([new_session/1, get_session_data/1, get_session_data/2, set_session_data/3]).
 -export([remove_session_data/2, delete_session/1]).
 
+-define(BOSS_SESSION_TABLE, boss_session_state).
+
 -record(state, {
         adapter, 
         connection
@@ -31,17 +33,33 @@ start(Options) ->
     random:seed(A1,A2,A3),
     {ok, Conn} = Adapter:start(Options),
     State = #state{adapter = Adapter, connection = Conn },
-    ets:new(boss_sessions,
-            [set, public, named_table, {read_concurrency, true}]),
-    ets:insert(boss_sessions, {state, State}),
+    setup_table(),
+    set_state(State),
     {ok, State}.
 
 stop() ->
+    teardown_table(),
     ok.
 
+setup_table() ->
+    case ets:info(?BOSS_SESSION_TABLE) of
+        undefined -> ets:new(?BOSS_SESSION_TABLE, [set, public, named_table, {read_concurrency, true}]);
+        _X -> ets:delete_all_objects(?BOSS_SESSION_TABLE)
+    end.
+
+teardown_table() ->
+    case ets:info(?BOSS_SESSION_TABLE) of
+        undefined -> ok;
+        _X ->
+            ets:delete(?BOSS_SESSION_TABLE)
+    end.
+
 get_state() ->
-    [{state, State}] = ets:lookup(boss_sessions, state),
+    [{state, State}] = ets:lookup(?BOSS_SESSION_TABLE, state),
     State.
+
+set_state(State) ->
+    ets:insert(?BOSS_SESSION_TABLE, {state, State}).
 
 get_session_key() ->
     boss_env:get_env(session_key, "_boss_session").

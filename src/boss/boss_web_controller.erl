@@ -40,6 +40,7 @@ terminate(_Reason, State) ->
     boss_router:stop(),
     boss_db:stop(),
     boss_cache:stop(),
+    boss_application:stop(),
     mochiweb_http:stop(),
     misultin:stop().
 
@@ -194,7 +195,7 @@ handle_info(timeout, State) ->
 		    end
 		end,				    				    
 		ControllerList = boss_files:web_controller_list(AppName),
-		{ok, RouterSupPid} = boss_router:start([{application, AppName},
+		{ok, _} = boss_router:start([{application, AppName},
                         {controllers, ControllerList}]),
                 {ok, TranslatorSupPid} = boss_translator:start([{application, AppName}]),
                 case boss_env:is_developing_app(AppName) of
@@ -204,7 +205,6 @@ handle_info(timeout, State) ->
                 InitData = run_init_scripts(AppName), 
                 #boss_app_info{ application = AppName,
                     init_data = InitData,
-                    router_sup_pid = RouterSupPid,
                     translator_sup_pid = TranslatorSupPid,
                     base_url = (if BaseURL =:= "/" -> ""; true -> BaseURL end),
                     static_prefix = StaticPrefix,
@@ -244,7 +244,7 @@ handle_info(timeout, State) ->
 	    _Oops
     end,
 
-    boss_application:init(AppInfoList),
+    boss_application:start(AppInfoList),
 
     {noreply, State#state{ applications = AppInfoList }}.
 
@@ -361,9 +361,8 @@ build_dynamic_response(AppInfo, Request, Response, Url) ->
         false -> production
     end,
     [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
-    [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
     {Time, {StatusCode, Headers, Payload}} = timer:tc(?MODULE, process_request, [
-            AppInfo#boss_app_info{ translator_pid = TranslatorPid, router_pid = RouterPid },
+            AppInfo#boss_app_info{ translator_pid = TranslatorPid },
             Request, Mode, Url, SessionID]),
     ErrorFormat = "~s ~s [~p] ~p ~pms~n", 
     RequestMethod = Request:request_method(),
@@ -425,9 +424,8 @@ process_request(AppInfo, Req, development, Url, SessionID) ->
             end;
         _ ->
             ControllerList = boss_files:web_controller_list(AppInfo#boss_app_info.application),
-            RouterPid = AppInfo#boss_app_info.router_pid,
-            boss_router:set_controllers(RouterPid, ControllerList),
-            boss_router:reload(RouterPid),
+            boss_router:set_controllers(ControllerList),
+            boss_router:reload(),
             process_dynamic_request(AppInfo, Req, development, Url, SessionID)
     end,
     process_result(AppInfo, Req, Result);
@@ -435,8 +433,8 @@ process_request(AppInfo, Req, Mode, Url, SessionID) ->
     Result = process_dynamic_request(AppInfo, Req, Mode, Url, SessionID),
     process_result(AppInfo, Req, Result).
 
-process_dynamic_request(#boss_app_info{ router_pid = RouterPid } = AppInfo, Req, Mode, Url, SessionID) ->
-    Result = case boss_router:route(RouterPid, Url) of
+process_dynamic_request(AppInfo, Req, Mode, Url, SessionID) ->
+    Result = case boss_router:route(Url) of
         {ok, {Application, Controller, Action, Tokens}} when Application =:= AppInfo#boss_app_info.application ->
             Location = {Controller, Action, Tokens},
             case catch load_and_execute(Mode, Location, AppInfo, Req, SessionID) of
@@ -460,8 +458,8 @@ process_dynamic_request(#boss_app_info{ router_pid = RouterPid } = AppInfo, Req,
     end,
     FinalResult.
 
-process_not_found(Message, #boss_app_info{ router_pid = RouterPid } = AppInfo, Req, Mode, SessionID) ->
-    case boss_router:handle(RouterPid, 404) of
+process_not_found(Message, AppInfo, Req, Mode, SessionID) ->
+    case boss_router:handle(404) of
         {ok, {Application, Controller, Action, Tokens}} when Application =:= AppInfo#boss_app_info.application ->
             Location = {Controller, Action, Tokens},
             case catch load_and_execute(Mode, Location, AppInfo, Req, SessionID) of
@@ -480,16 +478,16 @@ process_not_found(Message, #boss_app_info{ router_pid = RouterPid } = AppInfo, R
 
 process_error(Payload, AppInfo, _Req, development, _SessionID) ->
     error_logger:error_report(Payload),
-    ExtraMessage = case boss_router:handle(AppInfo#boss_app_info.router_pid, 500) of
+    ExtraMessage = case boss_router:handle(500) of
         undefined ->
             ["This message will appear in production; you may want to define a 500 handler in ", boss_files:routes_file(AppInfo#boss_app_info.application)];
         _ ->
             "(Don't worry, this message will not appear in production.)"
     end,
     {error, ["Error: <pre>", io_lib:print(Payload), "</pre>", "<p>", ExtraMessage, "</p>"], []};
-process_error(Payload, #boss_app_info{ router_pid = RouterPid } = AppInfo, Req, Mode, SessionID) ->
+process_error(Payload, AppInfo, Req, Mode, SessionID) ->
     error_logger:error_report(Payload),
-    case boss_router:handle(RouterPid, 500) of
+    case boss_router:handle(500) of
         {ok, {Application, Controller, Action, Tokens}} when Application =:= AppInfo#boss_app_info.application ->
             ErrorLocation = {Controller, Action, Tokens},
             case catch load_and_execute(Mode, ErrorLocation, AppInfo, Req, SessionID) of
@@ -530,17 +528,10 @@ process_result(AppInfo, Req, {moved, "http://"++Where, Headers}) ->
 process_result(AppInfo, Req, {moved, "https://"++Where, Headers}) ->
     process_result(AppInfo, Req, {moved_external, "https://"++Where, Headers});
 process_result(AppInfo, Req, {moved, {Application, Controller, Action, Params}, Headers}) ->
-    RouterPid = if
-        AppInfo#boss_app_info.application =:= Application ->
-            AppInfo#boss_app_info.router_pid;
-        true ->
-            boss_application:router_pid(Application)
-    end,
     ExtraParams = [{application, Application}, {controller, Controller}, {action, Action}],
     URL = boss_erlydtl_tags:url(ExtraParams ++ Params, [
             {host, Req:header(host)},
-            {application, AppInfo#boss_app_info.application},
-            {router_pid, RouterPid}]),
+            {application, AppInfo#boss_app_info.application}]),
     {301, [{"Location", URL}, {"Cache-Control", "no-cache"}|Headers], ""};
 process_result(AppInfo, _, {moved, Where, Headers}) ->
     {301, [{"Location", AppInfo#boss_app_info.base_url ++ Where}, {"Cache-Control", "no-cache"}|Headers], ""};
@@ -551,17 +542,10 @@ process_result(AppInfo, Req, {redirect, "http://"++Where, Headers}) ->
 process_result(AppInfo, Req, {redirect, "https://"++Where, Headers}) ->
     process_result(AppInfo, Req, {redirect_external, "https://"++Where, Headers});
 process_result(AppInfo, Req, {redirect, {Application, Controller, Action, Params}, Headers}) ->
-    RouterPid = if 
-        AppInfo#boss_app_info.application =:= Application ->
-            AppInfo#boss_app_info.router_pid;
-        true ->
-            boss_application:router_pid(Application)
-    end,
     ExtraParams = [{application, Application}, {controller, Controller}, {action, Action}],
     URL = boss_erlydtl_tags:url(ExtraParams ++ Params, [
             {host, Req:header(host)},
-            {application, AppInfo#boss_app_info.application},
-            {router_pid, RouterPid}]),
+            {application, AppInfo#boss_app_info.application}]),
     {302, [{"Location", URL}, {"Cache-Control", "no-cache"}|Headers], ""};
 process_result(AppInfo, _, {redirect, Where, Headers}) ->
     {302, [{"Location", AppInfo#boss_app_info.base_url ++ Where}, {"Cache-Control", "no-cache"}|Headers], ""};
@@ -768,7 +752,7 @@ process_action_result({{Controller, _, _}, Req, SessionID, LocationTrail}, {acti
     execute_action(process_location(Controller, OtherLocation, AppInfo), AppInfo, Req, SessionID, LocationTrail);
 
 process_action_result({_, Req, SessionID, LocationTrail}, not_found, _, AppInfo, _) ->
-    case boss_router:handle(AppInfo#boss_app_info.router_pid, 404) of
+    case boss_router:handle(404) of
         {ok, {Application, Controller, Action, Params}} when Application =:= AppInfo#boss_app_info.application ->
             case execute_action({Controller, Action, Params}, AppInfo, Req, SessionID, LocationTrail) of
                 {ok, Payload, Headers} ->
@@ -832,8 +816,7 @@ render_view({Controller, Template, _}, AppInfo, Req, SessionID, Variables, Heade
                                 {host, Req:header(host)},
                                 {application, atom_to_list(AppInfo#boss_app_info.application)},
                                 {controller, Controller}, 
-                                {action, Template},
-                                {router_pid, AppInfo#boss_app_info.router_pid}]}]) of
+                                {action, Template}]}]) of
                 {ok, Payload} ->
                     {ok, Payload, Headers};
                 Err ->
