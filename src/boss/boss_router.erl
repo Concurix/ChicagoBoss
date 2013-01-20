@@ -7,7 +7,7 @@
 %% Exported Functions
 %%
 -export([start/0, start/1, stop/0]).
--export([reload/0, route/1, unroute/3, handle/1, get_all/0, set_controllers/1]).
+-export([reload/1, route/2, unroute/4, handle/2, get_all/1, set_controllers/2]).
 
 %%
 %% API Functions
@@ -22,20 +22,20 @@ start(Options) ->
 stop() ->
     boss_router_controller:stop().
 
-reload() ->
-    boss_router_controller:reload().
+reload(Config) ->
+    boss_router_controller:reload(Config).
 
-route(Url) ->
-    boss_router_controller:route(Url).
+route(Config, Url) ->
+    boss_router_controller:route(Config, Url).
 
-unroute(Controller, Action, Params) ->
-    boss_router_controller:unroute(Controller, Action, Params).
+unroute(Config, Controller, Action, Params) ->
+    boss_router_controller:unroute(Config, Controller, Action, Params).
 
-handle(StatusCode) ->
-    boss_router_controller:handle(StatusCode).
+handle(Config, StatusCode) ->
+    boss_router_controller:handle(Config, StatusCode).
 
-get_all() ->
-    boss_router_controllers:get_all().
+get_all(Config) ->
+    boss_router_controllers:get_all(Config).
 
-set_controllers(Controllers) ->
-    boss_router_controller:set_controllers(Controllers).
+set_controllers(Config, Controllers) ->
+    boss_router_controller:set_controllers(Config, Controllers).

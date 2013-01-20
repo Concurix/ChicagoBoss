@@ -195,7 +195,7 @@ handle_info(timeout, State) ->
 		    end
 		end,				    				    
 		ControllerList = boss_files:web_controller_list(AppName),
-		{ok, _} = boss_router:start([{application, AppName},
+		{ok, RouterConfig} = boss_router:start([{application, AppName},
                         {controllers, ControllerList}]),
                 {ok, TranslatorSupPid} = boss_translator:start([{application, AppName}]),
                 case boss_env:is_developing_app(AppName) of
@@ -206,6 +206,7 @@ handle_info(timeout, State) ->
                 #boss_app_info{ application = AppName,
                     init_data = InitData,
                     translator_sup_pid = TranslatorSupPid,
+                    router_config = RouterConfig,
                     base_url = (if BaseURL =:= "/" -> ""; true -> BaseURL end),
                     static_prefix = StaticPrefix,
                     static_path = StaticPath,
@@ -408,10 +409,10 @@ process_request(#boss_app_info{ doc_prefix = DocPrefix } = AppInfo, Req, develop
     process_result(AppInfo, Req, Result);
 process_request(AppInfo, Req, development, Url, SessionID) ->
     DocPrefixPlusSlash = AppInfo#boss_app_info.doc_prefix ++ "/",
-    Result = case string:substr(Url, 1, length(DocPrefixPlusSlash)) of
+    case string:substr(Url, 1, length(DocPrefixPlusSlash)) of
         DocPrefixPlusSlash ->
             ModelName = lists:nthtail(length(DocPrefixPlusSlash), Url),
-            case string:chr(ModelName, $.) of
+            Result = case string:chr(ModelName, $.) of
                 0 ->
                     case catch load_and_execute(development, {"doc", ModelName, []}, AppInfo, Req, SessionID) of
                         {'EXIT', Reason} ->
@@ -421,20 +422,26 @@ process_request(AppInfo, Req, development, Url, SessionID) ->
                     end;
                 _ ->
                     {not_found, "File not found"}
-            end;
+            end,
+            process_result(AppInfo, Req, Result);
         _ ->
+            %% Modify the controller list of the router configuration and
+            %% update the application info with the new router configuration.
             ControllerList = boss_files:web_controller_list(AppInfo#boss_app_info.application),
-            boss_router:set_controllers(ControllerList),
-            boss_router:reload(),
-            process_dynamic_request(AppInfo, Req, development, Url, SessionID)
-    end,
-    process_result(AppInfo, Req, Result);
+            RouterConfig = AppInfo#boss_app_info.router_config,
+            NewRouterConfig = boss_router:set_controllers(RouterConfig, ControllerList),
+            boss_router:reload(NewRouterConfig),
+            NewAppInfo = AppInfo#boss_app_info{ router_config = NewRouterConfig },
+            boss_application:update_info(NewAppInfo),
+            Result = process_dynamic_request(NewAppInfo, Req, development, Url, SessionID),
+            process_result(NewAppInfo, Req, Result)
+    end;
 process_request(AppInfo, Req, Mode, Url, SessionID) ->
     Result = process_dynamic_request(AppInfo, Req, Mode, Url, SessionID),
     process_result(AppInfo, Req, Result).
 
 process_dynamic_request(AppInfo, Req, Mode, Url, SessionID) ->
-    Result = case boss_router:route(Url) of
+    Result = case boss_router:route(AppInfo#boss_app_info.router_config, Url) of
         {ok, {Application, Controller, Action, Tokens}} when Application =:= AppInfo#boss_app_info.application ->
             Location = {Controller, Action, Tokens},
             case catch load_and_execute(Mode, Location, AppInfo, Req, SessionID) of
@@ -459,7 +466,7 @@ process_dynamic_request(AppInfo, Req, Mode, Url, SessionID) ->
     FinalResult.
 
 process_not_found(Message, AppInfo, Req, Mode, SessionID) ->
-    case boss_router:handle(404) of
+    case boss_router:handle(AppInfo#boss_app_info.router_config, 404) of
         {ok, {Application, Controller, Action, Tokens}} when Application =:= AppInfo#boss_app_info.application ->
             Location = {Controller, Action, Tokens},
             case catch load_and_execute(Mode, Location, AppInfo, Req, SessionID) of
@@ -478,7 +485,7 @@ process_not_found(Message, AppInfo, Req, Mode, SessionID) ->
 
 process_error(Payload, AppInfo, _Req, development, _SessionID) ->
     error_logger:error_report(Payload),
-    ExtraMessage = case boss_router:handle(500) of
+    ExtraMessage = case boss_router:handle(AppInfo#boss_app_info.router_config, 500) of
         undefined ->
             ["This message will appear in production; you may want to define a 500 handler in ", boss_files:routes_file(AppInfo#boss_app_info.application)];
         _ ->
@@ -528,10 +535,17 @@ process_result(AppInfo, Req, {moved, "http://"++Where, Headers}) ->
 process_result(AppInfo, Req, {moved, "https://"++Where, Headers}) ->
     process_result(AppInfo, Req, {moved_external, "https://"++Where, Headers});
 process_result(AppInfo, Req, {moved, {Application, Controller, Action, Params}, Headers}) ->
+    RouterConfig = if
+        AppInfo#boss_app_info.application =:= Application ->
+            AppInfo#boss_app_info.router_config;
+        true ->
+            boss_application:router_config(Application)
+    end,
     ExtraParams = [{application, Application}, {controller, Controller}, {action, Action}],
     URL = boss_erlydtl_tags:url(ExtraParams ++ Params, [
             {host, Req:header(host)},
-            {application, AppInfo#boss_app_info.application}]),
+            {application, AppInfo#boss_app_info.application},
+            {router_config, RouterConfig}]),
     {301, [{"Location", URL}, {"Cache-Control", "no-cache"}|Headers], ""};
 process_result(AppInfo, _, {moved, Where, Headers}) ->
     {301, [{"Location", AppInfo#boss_app_info.base_url ++ Where}, {"Cache-Control", "no-cache"}|Headers], ""};
@@ -542,10 +556,17 @@ process_result(AppInfo, Req, {redirect, "http://"++Where, Headers}) ->
 process_result(AppInfo, Req, {redirect, "https://"++Where, Headers}) ->
     process_result(AppInfo, Req, {redirect_external, "https://"++Where, Headers});
 process_result(AppInfo, Req, {redirect, {Application, Controller, Action, Params}, Headers}) ->
+    RouterConfig = if
+        AppInfo#boss_app_info.application =:= Application ->
+            AppInfo#boss_app_info.router_config;
+        true ->
+            boss_application:router_config(Application)
+    end,
     ExtraParams = [{application, Application}, {controller, Controller}, {action, Action}],
     URL = boss_erlydtl_tags:url(ExtraParams ++ Params, [
             {host, Req:header(host)},
-            {application, AppInfo#boss_app_info.application}]),
+            {application, AppInfo#boss_app_info.application},
+            {router_config, RouterConfig}]),
     {302, [{"Location", URL}, {"Cache-Control", "no-cache"}|Headers], ""};
 process_result(AppInfo, _, {redirect, Where, Headers}) ->
     {302, [{"Location", AppInfo#boss_app_info.base_url ++ Where}, {"Cache-Control", "no-cache"}|Headers], ""};
@@ -752,7 +773,7 @@ process_action_result({{Controller, _, _}, Req, SessionID, LocationTrail}, {acti
     execute_action(process_location(Controller, OtherLocation, AppInfo), AppInfo, Req, SessionID, LocationTrail);
 
 process_action_result({_, Req, SessionID, LocationTrail}, not_found, _, AppInfo, _) ->
-    case boss_router:handle(404) of
+    case boss_router:handle(AppInfo#boss_app_info.router_config, 404) of
         {ok, {Application, Controller, Action, Params}} when Application =:= AppInfo#boss_app_info.application ->
             case execute_action({Controller, Action, Params}, AppInfo, Req, SessionID, LocationTrail) of
                 {ok, Payload, Headers} ->
@@ -816,7 +837,8 @@ render_view({Controller, Template, _}, AppInfo, Req, SessionID, Variables, Heade
                                 {host, Req:header(host)},
                                 {application, atom_to_list(AppInfo#boss_app_info.application)},
                                 {controller, Controller}, 
-                                {action, Template}]}]) of
+                                {action, Template},
+                                {router_config, AppInfo#boss_app_info.router_config}]}]) of
                 {ok, Payload} ->
                     {ok, Payload, Headers};
                 Err ->
