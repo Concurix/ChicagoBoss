@@ -172,7 +172,13 @@ handle_info(timeout, State) ->
     ServicesSupPid = State#state.service_sup_pid,
     AppInfoList = lists:map(fun
             (AppName) ->
-                application:start(AppName),
+                case application:start(AppName) of 
+                    ok ->
+                        ok;
+                    {error, Reason} ->
+                        error_logger:error_msg("Error starting application ~p: ~p~n",
+                                               [AppName, Reason])
+                end,
                 BaseURL = boss_env:get_env(AppName, base_url, "/"),
                 StaticPrefix = boss_env:get_env(AppName, static_prefix, "/static"),
                 DocPrefix = boss_env:get_env(AppName, doc_prefix, "/doc"),
