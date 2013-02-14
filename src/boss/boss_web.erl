@@ -19,7 +19,7 @@
 -include("boss_web.hrl").
 
 %% Maintain the application state in an ETS table rather than a
-%% boss_web_controller processes.
+%% boss_web_controller process.
 -define(BOSS_APPLICATION_TABLE, boss_application_state).
 
 start(AppInfos) ->
