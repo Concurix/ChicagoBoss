@@ -40,6 +40,7 @@ terminate(_Reason, State) ->
     boss_router:stop(),
     boss_db:stop(),
     boss_cache:stop(),
+    boss_web:stop(),
     mochiweb_http:stop(),
     misultin:stop().
 
@@ -247,6 +248,9 @@ handle_info(timeout, State) ->
         _Oops -> 		       
 	    _Oops
     end,
+
+    boss_web:start(AppInfoList),
+
     {noreply, State#state{ applications = AppInfoList }}.
 
 handle_call({reload_translation, Locale}, _From, State) ->
