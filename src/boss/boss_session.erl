@@ -39,6 +39,8 @@ start(Options) ->
     {ok, State}.
 
 stop() ->
+    #state{ adapter=Adapter, connection=Conn } = get_state(),
+    Adapter:stop(Conn),
     teardown_table(),
     ok.
 
