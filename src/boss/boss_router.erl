@@ -40,7 +40,6 @@ start(Options) ->
     HandlersTableId = ets:new(?BOSS_HANDLERS_TABLE, [ordered_set, public, {keypos, 2}]),
     Config = #boss_router_config{ application = BossApp, routes_table_id = RoutesTableId, 
                                   handlers_table_id = HandlersTableId, controllers = Controllers },
-    %% TODO: Implement load.
     load(Config),
     {ok, Config}.
 
