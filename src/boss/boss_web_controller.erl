@@ -41,6 +41,7 @@ terminate(_Reason, State) ->
     boss_db:stop(),
     boss_cache:stop(),
     mochiweb_http:stop(),
+    application:stop(elixir),
     misultin:stop().
 
 init(Config) ->
@@ -55,6 +56,8 @@ init(Config) ->
             %ok = error_logger:tty(false),
             ok = make_log_file_symlink(LogFile)
     end,
+
+    application:start(elixir),
 
     Env = boss_env:setup_boss_env(),
     error_logger:info_msg("Starting Boss in ~p mode....~n", [Env]),
@@ -86,10 +89,10 @@ init(Config) ->
 
     boss_session:start(),
 
-
     ThisNode = erlang:node(),
-    MasterNode = boss_env:get_env(master_node, ThisNode),
-    if MasterNode =:= ThisNode ->
+    MasterNode = boss_env:master_node(),
+    if 
+        MasterNode =:= ThisNode ->
             error_logger:info_msg("Starting master services on ~p~n", [MasterNode]),
             boss_mq:start(),
 
@@ -141,7 +144,7 @@ init(Config) ->
                 true -> misultin:start_link([{ssl, SSLOptions} | ServerConfig]);
                 false -> misultin:start_link(ServerConfig)
             end;
-	cowboy ->
+        cowboy ->
 		  %Dispatch = [{'_', [{'_', boss_mochicow_handler, [{loop, {boss_mochicow_handler, loop}}]}]}],
 		  error_logger:info_msg("Starting cowboy... on ~p~n", [MasterNode]),
 		  application:start(cowboy),
@@ -159,9 +162,11 @@ init(Config) ->
 						cowboy_ssl_transport, SSLConfig,
 						cowboy_http_protocol, [])
 		  end,
-		  if MasterNode =:= ThisNode ->
-			  boss_service_sup:start_services(ServicesSupPid, boss_websocket_router),		  
-			  boss_load:load_services_websockets()			    				
+		  if 
+              MasterNode =:= ThisNode ->
+                  boss_service_sup:start_services(ServicesSupPid, boss_websocket_router);
+              true ->
+                  ok
 		  end
 		  
 	  end,
@@ -184,22 +189,24 @@ handle_info(timeout, State) ->
                 DocPrefix = boss_env:get_env(AppName, doc_prefix, "/doc"),
                 DomainList = boss_env:get_env(AppName, domains, all),
                 ModelList = boss_files:model_list(AppName),
-	        ThisNode = erlang:node(),
-		MasterNode = boss_env:get_env(master_node, ThisNode),
-		if MasterNode =:= ThisNode ->
-		    case boss_env:get_env(server, misultin) of
-			cowboy ->
-			    WebSocketModules = boss_files:websocket_list(AppName),
-			    MappingServices  = boss_files:websocket_mapping(BaseURL,
-									    atom_to_list(AppName), 
-									    WebSocketModules),
-			    boss_service_sup:start_services(ServicesSupPid, MappingServices);
-			_Any ->
-			    _Any
-		    end
-		end,				    				    
-		ControllerList = boss_files:web_controller_list(AppName),
-		{ok, RouterSupPid} = boss_router:start([{application, AppName},
+                IsMasterNode = boss_env:is_master_node(),
+                if 
+                    IsMasterNode ->
+                        case boss_env:get_env(server, misultin) of
+                            cowboy ->
+                                WebSocketModules = boss_files:websocket_list(AppName),
+                                MappingServices  = boss_files:websocket_mapping(BaseURL,
+                                    atom_to_list(AppName), 
+                                    WebSocketModules),
+                                boss_service_sup:start_services(ServicesSupPid, MappingServices);
+                            _Any ->
+                                _Any
+                        end;
+                    true ->
+                        ok
+                end,				    				    
+                ControllerList = boss_files:web_controller_list(AppName),
+                {ok, RouterSupPid} = boss_router:start([{application, AppName},
                         {controllers, ControllerList}]),
                 {ok, TranslatorSupPid} = boss_translator:start([{application, AppName}]),
                 case boss_env:is_developing_app(AppName) of
@@ -222,7 +229,7 @@ handle_info(timeout, State) ->
 
     %% cowboy dispatch rule for static content
     case boss_env:get_env(server, misultin) of	    
-	cowboy ->
+        cowboy ->
 	    AppStaticDispatches = lists:map(
 				    fun(AppName) ->
 					    AppPath = boss_env:get_env(AppName, path, "./"),  
@@ -243,7 +250,11 @@ handle_info(timeout, State) ->
 
 	    Dispatch = Dispatch = [{'_', AppStaticDispatches ++ BossDispatch}],
 	    ProtoOpts = [{dispatch, Dispatch}],
-	    cowboy:set_protocol_options(boss_http_listener, ProtoOpts);
+        CowboyListener = case boss_env:get_env(ssl_enable, false) of
+            true -> boss_https_listener;
+            _ -> boss_http_listener
+        end,
+	    cowboy:set_protocol_options(CowboyListener, ProtoOpts);
         _Oops -> 		       
 	    _Oops
     end,
@@ -419,6 +430,8 @@ handle_request(Req, RequestMod, ResponseMod) ->
             Url = lists:nthtail(length(BaseURL), FullUrl),
             Response = simple_bridge:make_response(ResponseMod, {Req, DocRoot}),
             case Url of
+                "/apple-touch-icon.png" = File ->
+                    (Response:file(File)):build_response();
                 "/favicon.ico" = File ->
                     (Response:file(File)):build_response();
                 _ ->
@@ -479,7 +492,7 @@ build_dynamic_response(App, Request, Response, Url) ->
         {stream, Generator, Acc0} ->
             Response3 = Response2:data(chunked),
             Response3:build_response(),
-            process_chunk_generator(Request, RequestMethod, Generator, Acc0);
+            process_stream_generator(Request, RequestMethod, Generator, Acc0);
         _ ->
             (Response2:data(Payload)):build_response()
     end.
@@ -566,9 +579,9 @@ process_not_found(Message, #boss_app_info{ router_pid = RouterPid } = AppInfo, R
 process_error(Payload, AppInfo, _Req, development, _SessionID) ->
     error_logger:error_report(Payload),
     ExtraMessage = case boss_router:handle(AppInfo#boss_app_info.router_pid, 500) of
-        undefined ->
+        not_found ->
             ["This message will appear in production; you may want to define a 500 handler in ", boss_files:routes_file(AppInfo#boss_app_info.application)];
-        _ ->
+        _Route ->
             "(Don't worry, this message will not appear in production.)"
     end,
     {error, ["Error: <pre>", io_lib:print(Payload), "</pre>", "<p>", ExtraMessage, "</p>"], []};
@@ -589,14 +602,14 @@ process_error(Payload, #boss_app_info{ router_pid = RouterPid } = AppInfo, Req, 
             {error, ["Error: <pre>", io_lib:print(Payload), "</pre>"], []}
     end.
 
-process_chunk_generator(_Req, 'HEAD', _Generator, _Acc) ->
+process_stream_generator(_Req, 'HEAD', _Generator, _Acc) ->
     ok;
-process_chunk_generator(Req, Method, Generator, Acc) ->
+process_stream_generator(Req, Method, Generator, Acc) ->
     case Generator(Acc) of
         {output, Data, Acc1} ->
             Length = iolist_size(Data),
-            mochiweb_socket:send(Req:socket(), [io_lib:format("~.16b\r\n", [Length]), Data, <<"\r\n">>]),
-            process_chunk_generator(Req, Method, Generator, Acc1);
+            ok = mochiweb_socket:send(Req:socket(), [io_lib:format("~.16b\r\n", [Length]), Data, <<"\r\n">>]),
+            process_stream_generator(Req, Method, Generator, Acc1);
         done ->
             mochiweb_socket:send(Req:socket(), ["0\r\n\r\n"]),
             ok
@@ -662,13 +675,13 @@ process_result(_, _, {StatusCode, Payload, Headers}) when is_integer(StatusCode)
     {StatusCode, merge_headers(Headers, [{"Content-Type", "text/html"}]), Payload}.
 
 load_and_execute(Mode, {Controller, _, _} = Location, AppInfo, Req, SessionID) when Mode =:= production; Mode =:= testing->
-    case lists:member(boss_files:web_controller(AppInfo#boss_app_info.application, Controller), 
+    case boss_files:is_controller_present(AppInfo#boss_app_info.application, Controller, 
             AppInfo#boss_app_info.controller_modules) of
         true -> execute_action(Location, AppInfo, Req, SessionID);
         false -> render_view(Location, AppInfo, Req, SessionID)
     end;
 load_and_execute(development, {"doc", ModelName, _}, AppInfo, Req, _SessionID) ->
-    case boss_load:load_models() of
+    case boss_load:load_models(AppInfo#boss_app_info.application) of
         {ok, ModelModules} ->
             case lists:member(ModelName, lists:map(fun atom_to_list/1, ModelModules)) of
                 true ->
@@ -692,25 +705,30 @@ load_and_execute(development, {"doc", ModelName, _}, AppInfo, Req, _SessionID) -
             render_errors(ErrorList, AppInfo, Req)
     end;
 load_and_execute(development, {Controller, _, _} = Location, AppInfo, Req, SessionID) ->
-    Res1 = boss_load:load_mail_controllers(),
+    Application = AppInfo#boss_app_info.application,
+    Res1 = boss_load:load_mail_controllers(Application),
     Res2 = case Res1 of
-        {ok, _} -> boss_load:load_libraries();
+        {ok, _} -> boss_load:load_libraries(Application);
         _ -> Res1
     end,
     Res3 = case Res2 of
-        {ok, _} -> boss_load:load_view_lib_modules();
+        {ok, _} -> boss_load:load_view_lib_modules(Application);
         _ -> Res2
     end,
     Res4 = case Res3 of
-        {ok, _} -> boss_load:load_web_controllers();
+        {ok, _} -> boss_load:load_services_websockets(Application);
         _ -> Res3
     end,
-    case Res4 of
+    Res5 = case Res4 of
+        {ok, _} -> boss_load:load_web_controllers(Application);
+        _ -> Res4
+    end,
+    case Res5 of
         {ok, Controllers} ->
-            case lists:member(boss_files:web_controller(AppInfo#boss_app_info.application, Controller), 
-                    lists:map(fun atom_to_list/1, Controllers)) of
+            case boss_files:is_controller_present(Application, Controller,
+                    lists:map(fun atom_to_list/1, Controllers)) of 
                 true ->
-                    case boss_load:load_models() of
+                    case boss_load:load_models(Application) of
                         {ok, _} ->
                             execute_action(Location, AppInfo, Req, SessionID);
                         {error, ErrorList} ->
@@ -746,50 +764,39 @@ execute_action({Controller, Action, Tokens} = Location, AppInfo, Req, SessionID,
         false ->
             % do not convert a list to an atom until we are sure the controller/action
             % pair exists. this prevents a memory leak due to atom creation.
-            Module = list_to_atom(boss_files:web_controller(AppInfo#boss_app_info.application, Controller)),
-            ExportStrings = lists:map(
-                fun({Function, Arity}) -> {atom_to_list(Function), Arity} end,
-                Module:module_info(exports)),
+            Adapters = [boss_controller_adapter_pmod, boss_controller_adapter_elixir],
+
+            Adapter = lists:foldl(fun
+                    (A, false) ->
+                        case A:accept(AppInfo#boss_app_info.application, Controller) of
+                            true -> A;
+                            _ -> false
+                        end;
+                    (_, Acc) -> Acc
+                end, false, Adapters),
+
+            AdapterInfo = Adapter:init(AppInfo#boss_app_info.application, Controller, Req, SessionID),
             RequestMethod = Req:request_method(),
-            ControllerInstance = case proplists:get_value("new", ExportStrings) of
-                1 -> Module:new(Req);
-                2 -> Module:new(Req, SessionID)
-            end,
-            AuthResult = case proplists:get_value("before_", ExportStrings) of
-                2 -> ControllerInstance:before_(Action);
-                4 -> ControllerInstance:before_(Action, RequestMethod, Tokens);
-                _ -> ok
-            end,
+
+            AuthResult = Adapter:before_filter(AdapterInfo, Action, RequestMethod, Tokens),
+
             AuthInfo = case AuthResult of
                 ok ->
                     {ok, undefined};
                 OtherInfo ->
                     OtherInfo
             end,
+
             case AuthInfo of
                 {ok, Info} ->
                     EffectiveRequestMethod = case Req:request_method() of
                         'HEAD' -> 'GET';
                         Method -> Method
                     end,
-                   ActionResult = case proplists:get_value(Action, ExportStrings) of
-                        3 ->
-                            ActionAtom = list_to_atom(Action),
-                            ControllerInstance:ActionAtom(EffectiveRequestMethod, Tokens);
-                        4 ->
-                            ActionAtom = list_to_atom(Action),
-                            ControllerInstance:ActionAtom(EffectiveRequestMethod, Tokens, Info);
-                        _ ->
-                            undefined
-                    end,
-                    LangResult = case proplists:get_value("lang_", ExportStrings) of
-                        2 ->
-                            ControllerInstance:lang_(Action);
-                        3 ->
-                            ControllerInstance:lang_(Action, Info);
-                        _ ->
-                            auto
-                    end,
+
+                    ActionResult = Adapter:action(AdapterInfo, Action, EffectiveRequestMethod, Tokens, Info),
+                    LangResult = Adapter:language(AdapterInfo, Action, Info),
+
                     LangHeaders = case LangResult of
                         auto -> [];
                         _ -> [{"Content-Language", LangResult}]
@@ -801,14 +808,8 @@ execute_action({Controller, Action, Tokens} = Location, AppInfo, Req, SessionID,
                             process_action_result({Location, Req, SessionID, [Location|LocationTrail]}, 
                                 ActionResult, LangHeaders, AppInfo, Info)
                     end,
-                    case proplists:get_value("after_", ExportStrings) of
-                        3 ->
-                            ControllerInstance:after_(Action, Result);
-                        4 ->
-                            ControllerInstance:after_(Action, Result, Info);
-                        _ ->
-                            Result
-                    end;
+
+                    Adapter:after_filter(AdapterInfo, Action, Result, Info);
                 {redirect, Where} ->
                     {redirect, process_redirect(Controller, Where, AppInfo)};
 				{output, Payload, Headers} ->
@@ -900,32 +901,38 @@ render_view(Location, AppInfo, Req, SessionID, Variables) ->
     render_view(Location, AppInfo, Req, SessionID, Variables, []).
 
 render_view({Controller, Template, _}, AppInfo, Req, SessionID, Variables, Headers) ->
-    ViewPath = boss_files:web_view_path(Controller, Template),
-    LoadResult = boss_load:load_view_if_dev(AppInfo#boss_app_info.application, ViewPath, AppInfo#boss_app_info.translator_pid),
+    TryExtensions = boss_files:template_extensions(),
+    LoadResult = lists:foldl(fun
+            (Ext, {error, not_found}) ->
+                ViewPath = boss_files:web_view_path(Controller, Template, Ext),
+                boss_load:load_view_if_dev(AppInfo#boss_app_info.application, 
+                    ViewPath, AppInfo#boss_app_info.translator_pid);
+            (_, Acc) -> 
+                Acc
+        end, {error, not_found}, TryExtensions),
     BossFlash = boss_flash:get_and_clear(SessionID),
     SessionData = boss_session:get_session_data(SessionID),
     case LoadResult of
-        {ok, Module} ->
+        {ok, Module, TemplateAdapter} ->
+            TranslatableStrings = TemplateAdapter:translatable_strings(Module),
             {Lang, TranslationFun} = choose_translation_fun(AppInfo#boss_app_info.translator_pid, 
-                Module:translatable_strings(), Req:header(accept_language), 
+                TranslatableStrings, Req:header(accept_language), 
                 proplists:get_value("Content-Language", Headers)),
             RenderVars = BossFlash ++ [{"_lang", Lang}, {"_session", SessionData},
                             {"_base_url", AppInfo#boss_app_info.base_url}|Variables],
-            case Module:render([{"_vars", RenderVars}|RenderVars],
+            case TemplateAdapter:render(Module, [{"_vars", RenderVars}|RenderVars],
                     [{translation_fun, TranslationFun}, {locale, Lang},
-                        {custom_tags_context, [
-                                {host, Req:header(host)},
-                                {application, atom_to_list(AppInfo#boss_app_info.application)},
-                                {controller, Controller}, 
-                                {action, Template},
-                                {router_pid, AppInfo#boss_app_info.router_pid}]}]) of
+                        {host, Req:header(host)}, {application, atom_to_list(AppInfo#boss_app_info.application)},
+                        {controller, Controller}, {action, Template},
+                        {router_pid, AppInfo#boss_app_info.router_pid}]) of
                 {ok, Payload} ->
                     {ok, Payload, Headers};
                 Err ->
                     Err
             end;
         {error, not_found} ->
-            {not_found, io_lib:format("The requested template (~p) was not found.", [ViewPath]) };
+            AnyViewPath = boss_files:web_view_path(Controller, Template, "{" ++ string:join(TryExtensions, ",") ++ "}"),
+            {not_found, io_lib:format("The requested template (~p) was not found.", [AnyViewPath]) };
         {error, {File, [{0, _Module, "Failed to read file"}]}} ->
             {not_found, io_lib:format("The requested template (~p) was not found.", [File]) };
         {error, Error}-> 
