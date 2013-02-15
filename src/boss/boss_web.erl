@@ -8,11 +8,12 @@
         get_all_routes/0,
         get_all_models/0,
         get_all_applications/0,
+        get_all_application_infos/0,
         base_url/1,
         domains/1,
         static_prefix/1,
         translator_pid/1,
-        router_pid/1,
+        router_config/1,
         application_info/1,
         update_info/1]).
 
@@ -84,10 +85,8 @@ set_application_infos(AppInfos) ->
 
 reload_routes() ->
     foreach_application_info(
-      %% TODO: Replace RouterPid when refactoring boss_router.
-      fun(#boss_app_info{router_sup_pid = RouterSupPid}) ->
-              [{_, RouterPid, _, _}] = supervisor:which_children(RouterSupPid),
-              boss_router:reload(RouterPid)
+      fun(#boss_app_info{router_config = RouterConfig}) ->
+              boss_router:reload(RouterConfig)
       end).
 
 reload_translation(Locale) ->
@@ -115,10 +114,8 @@ reload_init_scripts() ->
 
 get_all_routes() ->
     map_application_infos(
-      %% TODO: Replace RouterPid when refactoring boss_router.
-      fun(#boss_app_info{application = AppName, router_sup_pid = RouterSupPid}) ->
-              [{_, RouterPid, _, _}] = supervisor:which_children(RouterSupPid),
-              {AppName, boss_router:get_all(RouterPid)}
+      fun(#boss_app_info{application = AppName, router_config = RouterConfig}) ->
+              {AppName, boss_router:get_all(RouterConfig)}
       end).
 
 get_all_models() ->
@@ -163,12 +160,10 @@ translator_pid(AppName) ->
             ""
     end.
 
-router_pid(AppName) ->
+router_config(AppName) ->
     case application_info(AppName) of
-        %% TODO: Replace RouterPid when refactoring boss_router.
-        #boss_app_info{ router_sup_pid = SupPid } ->
-            [{_, RouterPid, _, _}] = supervisor:which_children(SupPid),
-            RouterPid;
+        #boss_app_info{ router_config = RouterConfig } ->
+            RouterConfig;
         _ ->
             ""
     end.

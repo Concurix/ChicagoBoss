@@ -48,7 +48,7 @@ url(Variables, Options) ->
             end
     end,
 
-    RouterPid = proplists:get_value(router_pid, Options),
-    URL = boss_router:unroute(RouterPid, LinkedController, Action, NoUndefinedVars),
+    RouterConfig = proplists:get_value(router_config, Options),
+    URL = boss_router:unroute(RouterConfig, LinkedController, Action, NoUndefinedVars),
     BaseURL = boss_web:base_url(list_to_atom(lists:concat([LinkedApp]))),
     ProtocolPlusDomain ++ BaseURL ++ URL.
