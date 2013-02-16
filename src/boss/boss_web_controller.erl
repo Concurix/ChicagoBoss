@@ -37,7 +37,9 @@ terminate(_Reason, State) ->
         end, State#state.applications),
     error_logger:logfile(close),
     boss_translator:stop(),
-    boss_router:stop(),
+    lists:map(fun(AppInfo) ->
+                      boss_router:stop(AppInfo#boss_app_info.router_config)
+              end, State#state.applications),
     boss_db:stop(),
     boss_cache:stop(),
     boss_web:stop(),
