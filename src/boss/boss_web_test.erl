@@ -19,7 +19,7 @@ bootstrap_test_env(Application, Adapter) ->
                 end
         end, [], [db_port, db_host, db_username, db_password, db_database]),
     %ok = application:start(Application),
-    {ok, RouterSupPid} = boss_router:start([{application, Application}, 
+    {ok, RouterConfig} = boss_router:start([{application, Application}, 
             {controllers, boss_files:web_controller_list(Application)}]),
     boss_db:start([{adapter, Adapter}|DBOptions]),
     boss_session:start(),
@@ -35,7 +35,7 @@ bootstrap_test_env(Application, Adapter) ->
         application = Application,
         base_url = "",
         init_data = [],
-        router_sup_pid = RouterSupPid,
+        router_config = RouterConfig,
         translator_sup_pid = TranslatorSupPid,
         model_modules = boss_files:model_list(Application),
         controller_modules = boss_files:web_controller_list(Application)
@@ -322,10 +322,9 @@ get_request_loop(AppInfo) ->
     receive
         {From, Uri, Headers} ->
             Req = make_request('GET', Uri, Headers),
-            [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
             [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
             Result = boss_web_controller:process_request(AppInfo#boss_app_info {
-                    router_pid = RouterPid, translator_pid = TranslatorPid }, 
+                    translator_pid = TranslatorPid }, 
                 Req, testing, Uri, undefined),
             From ! {self(), Uri, Result};
         Other ->
@@ -339,12 +338,11 @@ post_request_loop(AppInfo) ->
             erlang:put(mochiweb_request_body, Body),
             erlang:put(mochiweb_request_body_length, length(Body)),
             erlang:put(mochiweb_request_post, mochiweb_util:parse_qs(Body)),
-            [{_, RouterPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.router_sup_pid),
             [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
             Req = make_request('POST', Uri, 
                 [{"Content-Encoding", "application/x-www-form-urlencoded"} | Headers]),
             Result = boss_web_controller:process_request(AppInfo#boss_app_info{
-                    router_pid = RouterPid, translator_pid = TranslatorPid }, 
+                    translator_pid = TranslatorPid }, 
                 Req, testing, Uri, undefined),
             From ! {self(), Uri, Result};
         Other ->
