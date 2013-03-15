@@ -8,7 +8,6 @@
 -export([remove_session_data/2, delete_session/1]).
 
 %% Maintain the adapter and connection state in a singleton ETS table entry
-%% rather than a pool of boss_session_controller processes.
 -define(BOSS_SESSION_TABLE, boss_session_state).
 -record(state, {
           adapter, 
