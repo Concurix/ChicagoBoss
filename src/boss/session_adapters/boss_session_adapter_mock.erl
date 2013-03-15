@@ -54,6 +54,7 @@ get_state() ->
 set_state(State) ->
     ets:insert(?BOSS_SESSION_ADAPTER_MOCK_TABLE, {state, State}).
 
+%% TODO: Eliminate potential lost update here when timestamp is increased.
 session_exists(_, undefined) ->
     false;
 session_exists(_, SessionID) ->
@@ -74,6 +75,8 @@ session_exists(_, SessionID) ->
     set_state(prune_expired_sessions(NewState, now_seconds())),
     Exists.
 
+%% TODO: Eliminate race condition where a concurrent access clobbers this
+%% write of a new session.
 create_session(_, SessionID, Data) ->
     State = get_state(),
     NowSeconds = now_seconds(),
@@ -100,6 +103,8 @@ lookup_session_value(_, SessionID, Key) ->
     end,
     proplists:get_value(Key, Data).
 
+%% TODO: Eliminate race condition on session table state, which used
+%% to be a per-process table, but now is public.
 set_session_value(_, SessionID, Key, Value) ->
     State = get_state(),
     Data = case ets:lookup(State#state.table, SessionID) of
@@ -116,6 +121,7 @@ set_session_value(_, SessionID, Key, Value) ->
     ets:insert(State#state.table, #boss_session{sid=SessionID,data=Data1}),
     ok.
 
+%% TODO: Eliminate race condition on session dictionary and time-to-live tree.
 delete_session(_, SessionID) ->
     State = get_state(),
     ets:delete(State#state.table, SessionID),
@@ -131,6 +137,7 @@ delete_session(_, SessionID) ->
     set_state(NewState),
     ok.
 
+%% TODO: Eliminate race conditions on session table state.
 delete_session_value(_, SessionID, Key) ->
     State = get_state(),
     case ets:lookup(?MODULE,SessionID) of
