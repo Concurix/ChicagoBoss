@@ -29,14 +29,14 @@ bootstrap_test_env(Application, Adapter) ->
         end, boss_files:init_file_list(Application)),
     boss_news:start(),
     boss_mail:start([{driver, boss_mail_driver_mock}]),
-    {ok, TranslatorSupPid} = boss_translator:start([{application, Application}]),
-    boss_load:load_all_modules(Application, TranslatorSupPid),
+    {ok, TranslatorConfig} = boss_translator:start([{application, Application}]),
+    boss_load:load_all_modules(Application, TranslatorConfig),
     #boss_app_info{ 
         application = Application,
         base_url = "",
         init_data = [],
         router_config = RouterConfig,
-        translator_sup_pid = TranslatorSupPid,
+        translator_config = TranslatorConfig,
         model_modules = boss_files:model_list(Application),
         controller_modules = boss_files:web_controller_list(Application)
     }.
@@ -322,9 +322,7 @@ get_request_loop(AppInfo) ->
     receive
         {From, Uri, Headers} ->
             Req = make_request('GET', Uri, Headers),
-            [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
-            Result = boss_web_controller:process_request(AppInfo#boss_app_info {
-                    translator_pid = TranslatorPid }, 
+            Result = boss_web_controller:process_request(AppInfo, 
                 Req, testing, Uri, undefined),
             From ! {self(), Uri, Result};
         Other ->
@@ -338,11 +336,9 @@ post_request_loop(AppInfo) ->
             erlang:put(mochiweb_request_body, Body),
             erlang:put(mochiweb_request_body_length, length(Body)),
             erlang:put(mochiweb_request_post, mochiweb_util:parse_qs(Body)),
-            [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
             Req = make_request('POST', Uri, 
                 [{"Content-Encoding", "application/x-www-form-urlencoded"} | Headers]),
-            Result = boss_web_controller:process_request(AppInfo#boss_app_info{
-                    translator_pid = TranslatorPid }, 
+            Result = boss_web_controller:process_request(AppInfo, 
                 Req, testing, Uri, undefined),
             From ! {self(), Uri, Result};
         Other ->

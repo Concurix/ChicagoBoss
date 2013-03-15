@@ -212,16 +212,16 @@ handle_info(timeout, State) ->
                 ControllerList = boss_files:web_controller_list(AppName),
                 {ok, RouterConfig} = boss_router:start([{application, AppName},
                         {controllers, ControllerList}]),
-                {ok, TranslatorSupPid} = boss_translator:start([{application, AppName}]),
+                {ok, TranslatorConfig} = boss_translator:start([{application, AppName}]),
                 case boss_env:is_developing_app(AppName) of
-                    true -> boss_load:load_all_modules(AppName, TranslatorSupPid);
+                    true -> boss_load:load_all_modules(AppName, TranslatorConfig);
                     false -> ok
                 end,
                 InitData = run_init_scripts(AppName), 
                 #boss_app_info{ application = AppName,
                     init_data = InitData,
                     router_config = RouterConfig,
-                    translator_sup_pid = TranslatorSupPid,
+                    translator_config = TranslatorConfig,
                     base_url = (if BaseURL =:= "/" -> ""; true -> BaseURL end),
                     static_prefix = StaticPrefix,
                     static_path = StaticPath,
@@ -382,10 +382,8 @@ build_dynamic_response(AppInfo, Request, Response, Url) ->
         true -> development;
         false -> production
     end,
-    [{_, TranslatorPid, _, _}] = supervisor:which_children(AppInfo#boss_app_info.translator_sup_pid),
     {Time, {StatusCode, Headers, Payload}} = timer:tc(?MODULE, process_request, [
-            AppInfo#boss_app_info{ translator_pid = TranslatorPid }, 
-            Request, Mode, Url, SessionID]),
+            AppInfo, Request, Mode, Url, SessionID]),
     ErrorFormat = "~s ~s [~p] ~p ~pms~n", 
     RequestMethod = Request:request_method(),
     FullUrl = Request:path(),
@@ -834,7 +832,7 @@ render_view({Controller, Template, _}, AppInfo, Req, SessionID, Variables, Heade
             (Ext, {error, not_found}) ->
                 ViewPath = boss_files:web_view_path(Controller, Template, Ext),
                 boss_load:load_view_if_dev(AppInfo#boss_app_info.application, 
-                    ViewPath, AppInfo#boss_app_info.translator_pid);
+                    ViewPath, AppInfo#boss_app_info.translator_config);
             (_, Acc) -> 
                 Acc
         end, {error, not_found}, TryExtensions),
@@ -843,7 +841,7 @@ render_view({Controller, Template, _}, AppInfo, Req, SessionID, Variables, Heade
     case LoadResult of
         {ok, Module, TemplateAdapter} ->
             TranslatableStrings = TemplateAdapter:translatable_strings(Module),
-            {Lang, TranslationFun} = choose_translation_fun(AppInfo#boss_app_info.translator_pid, 
+            {Lang, TranslationFun} = choose_translation_fun(AppInfo#boss_app_info.translator_config, 
                 TranslatableStrings, Req:header(accept_language), 
                 proplists:get_value("Content-Language", Headers)),
             RenderVars = BossFlash ++ [{"_lang", Lang}, {"_session", SessionData},
@@ -870,24 +868,24 @@ render_view({Controller, Template, _}, AppInfo, Req, SessionID, Variables, Heade
 choose_translation_fun(_, _, undefined, undefined) ->
     DefaultLang = boss_env:get_env(assume_locale, "en"),
     {DefaultLang, none};
-choose_translation_fun(TranslatorPid, Strings, AcceptLanguages, undefined) ->
+choose_translation_fun(TranslatorConfig, Strings, AcceptLanguages, undefined) ->
     DefaultLang = boss_env:get_env(assume_locale, "en"),
     case mochiweb_util:parse_qvalues(AcceptLanguages) of
         invalid_qvalue_string ->
             {DefaultLang, none};
         [{Lang, _}] ->
-            {Lang, boss_translator:fun_for(TranslatorPid, Lang)};
+            {Lang, boss_translator:fun_for(TranslatorConfig, Lang)};
         QValues when length(QValues) > 1 ->
-            {BestLang, BestNetQValue} = choose_language_from_qvalues(TranslatorPid, Strings, QValues),
+            {BestLang, BestNetQValue} = choose_language_from_qvalues(TranslatorConfig, Strings, QValues),
             case BestNetQValue of
                 0.0 -> {DefaultLang, none};
-                _ -> {BestLang, boss_translator:fun_for(TranslatorPid, BestLang)}
+                _ -> {BestLang, boss_translator:fun_for(TranslatorConfig, BestLang)}
             end
     end;
-choose_translation_fun(TranslatorPid, _, _, ContentLanguage) ->
-    {ContentLanguage, boss_translator:fun_for(TranslatorPid, ContentLanguage)}.
+choose_translation_fun(TranslatorConfig, _, _, ContentLanguage) ->
+    {ContentLanguage, boss_translator:fun_for(TranslatorConfig, ContentLanguage)}.
 
-choose_language_from_qvalues(TranslatorPid, Strings, QValues) ->
+choose_language_from_qvalues(TranslatorConfig, Strings, QValues) ->
     % calculating translation coverage is costly so we start with the most preferred
     % languages and work our way down
     SortedQValues = lists:reverse(lists:keysort(2, QValues)),
@@ -901,7 +899,7 @@ choose_language_from_qvalues(TranslatorPid, Strings, QValues) ->
                                                                      ThisQValue > BestTranslationScore ->
                 {ThisLang, ThisQValue}; % translation coverage is 100%
             ({ThisLang, ThisQValue}, {BestLang, BestTranslationScore}) ->
-                TranslationCoverage = translation_coverage(Strings, ThisLang, TranslatorPid),
+                TranslationCoverage = translation_coverage(Strings, ThisLang, TranslatorConfig),
                 TranslationScore = ThisQValue * TranslationCoverage + 
                                     AssumedLocaleQValue * (1-TranslationCoverage),
                 case TranslationScore > BestTranslationScore andalso TranslationCoverage > 0.0 of
@@ -912,11 +910,11 @@ choose_language_from_qvalues(TranslatorPid, Strings, QValues) ->
 
 translation_coverage([], _, _) ->
     0.0;
-translation_coverage(Strings, Locale, TranslatorPid) ->
-    case boss_translator:is_loaded(TranslatorPid, Locale) of
+translation_coverage(Strings, Locale, TranslatorConfig) ->
+    case boss_translator:is_loaded(TranslatorConfig, Locale) of
         true ->
             lists:foldl(fun(String, Acc) ->
-                        case boss_translator:lookup(TranslatorPid, String, Locale) of
+                        case boss_translator:lookup(TranslatorConfig, String, Locale) of
                             undefined -> Acc;
                             _ -> Acc + 1
                         end

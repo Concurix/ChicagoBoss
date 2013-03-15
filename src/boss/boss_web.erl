@@ -12,7 +12,7 @@
         base_url/1,
         domains/1,
         static_prefix/1,
-        translator_pid/1,
+        translator_config/1,
         router_config/1,
         application_info/1,
         update_info/1]).
@@ -91,16 +91,16 @@ reload_routes() ->
 
 reload_translation(Locale) ->
     foreach_application_info(
-      fun(#boss_app_info{translator_sup_pid = TranslatorSupPid}) ->
-              [{_, TranslatorPid, _, _}] = supervisor:which_children(TranslatorSupPid),
-              boss_translator:reload(TranslatorPid, Locale)
+      fun(#boss_app_info{translator_config = TranslatorConfig} = AppInfo) ->
+              NewTranslatorConfig = boss_translator:reload(TranslatorConfig, Locale),
+              update_info(AppInfo#boss_app_info{translator_config = NewTranslatorConfig})
       end).
 
 reload_all_translations() ->
     foreach_application_info(
-      fun(#boss_app_info{translator_sup_pid = TranslatorSupPid}) ->
-              [{_, TranslatorPid, _, _}] = supervisor:which_children(TranslatorSupPid),
-              boss_translator:reload_all(TranslatorPid)
+      fun(#boss_app_info{translator_config = TranslatorConfig} = AppInfo) ->
+              NewTranslatorConfig = boss_translator:reload_all(TranslatorConfig),
+              update_info(AppInfo#boss_app_info{translator_config = NewTranslatorConfig})
       end).
 
 reload_init_scripts() ->
@@ -151,11 +151,10 @@ static_prefix(App) ->
             ""
     end.
 
-translator_pid(AppName) ->
+translator_config(AppName) ->
     case application_info(AppName) of
-        #boss_app_info{ translator_sup_pid = SupPid } ->
-            [{_, TranslatorPid, _, _}] = supervisor:which_children(SupPid),
-            TranslatorPid;
+        #boss_app_info{ translator_config = TranslatorConfig } ->
+            TranslatorConfig;
         _ ->
             ""
     end.

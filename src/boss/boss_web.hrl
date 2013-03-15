@@ -8,8 +8,7 @@
         domains,
         init_data,
         router_config,
-        translator_sup_pid,
-        translator_pid,
+        translator_config,
         model_modules = [],
         controller_modules = []
     }).

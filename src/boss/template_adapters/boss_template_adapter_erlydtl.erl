@@ -17,7 +17,7 @@ render(Module, Variables, RenderOptions) ->
 
 compile_file(ViewPath, Module, Options) ->
     HelperDirModule = proplists:get_value(helper_module, Options),
-    TranslatorPid = proplists:get_value(translator_pid, Options),
+    TranslatorConfig = proplists:get_value(translator_config, Options),
     OutDir = proplists:get_value(out_dir, Options),
     CompilerOptions = proplists:get_value(compiler_options, Options, []),
     Locales = proplists:get_value(locales, Options, []),
@@ -32,7 +32,7 @@ compile_file(ViewPath, Module, Options) ->
             {custom_filters_modules, FilterHelpers ++ ExtraFilterHelpers},
             {compiler_options, CompilerOptions}, {out_dir, OutDir}, {blocktrans_fun,
                 fun(BlockString, Locale) ->
-                        case boss_translator:lookup(TranslatorPid, BlockString, Locale) of
+                        case boss_translator:lookup(TranslatorConfig, BlockString, Locale) of
                             undefined -> default;
                             Body -> list_to_binary(Body)
                         end

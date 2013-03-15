@@ -17,11 +17,10 @@
 
 -define(CUSTOM_TAGS_DIR_MODULE, '_view_lib_tags').
 
-load_all_modules(Application, TranslatorSupPid) ->
-    load_all_modules(Application, TranslatorSupPid, undefined).
+load_all_modules(Application, TranslatorConfig) ->
+    load_all_modules(Application, TranslatorConfig, undefined).
 
-load_all_modules(Application, TranslatorSupPid, OutDir) ->
-    [{_, TranslatorPid, _, _}] = supervisor:which_children(TranslatorSupPid),
+load_all_modules(Application, TranslatorConfig, OutDir) ->
     {ok, TestModules} = load_dirs(boss_files:test_path(), Application, OutDir, fun compile/2),
     {ok, LibModules} = load_libraries(Application, OutDir),
     {ok, WebSocketModules} = load_services_websockets(Application, OutDir),
@@ -29,8 +28,8 @@ load_all_modules(Application, TranslatorSupPid, OutDir) ->
     {ok, ControllerModules} = load_web_controllers(Application, OutDir),
     {ok, ModelModules} = load_models(Application, OutDir),
     {ok, ViewHelperModules} = load_view_lib_modules(Application, OutDir),
-    {ok, ViewLibModules} = load_view_lib(Application, OutDir, TranslatorPid),
-    {ok, ViewModules} = load_views(Application, OutDir, TranslatorPid),
+    {ok, ViewLibModules} = load_view_lib(Application, OutDir, TranslatorConfig),
+    {ok, ViewModules} = load_views(Application, OutDir, TranslatorConfig),
     AllModules = [{test_modules, TestModules}, 
 		  {lib_modules, LibModules}, {websocket_modules, WebSocketModules},
 		  {mail_modules, MailModules}, {controller_modules, ControllerModules},
@@ -40,8 +39,8 @@ load_all_modules(Application, TranslatorSupPid, OutDir) ->
 
 load_all_modules_and_emit_app_file(AppName, OutDir) ->
     application:start(elixir),
-    {ok, TranslatorSupPid} = boss_translator:start([{application, AppName}]),
-    {ok, ModulePropList} = load_all_modules(AppName, TranslatorSupPid, OutDir),
+    {ok, TranslatorConfig} = boss_translator:start([{application, AppName}]),
+    {ok, ModulePropList} = load_all_modules(AppName, TranslatorConfig, OutDir),
     AllModules = lists:foldr(fun({_, Mods}, Acc) -> Mods ++ Acc end, [], ModulePropList),
 	DotAppSrc = boss_files:dot_app_src(AppName),
     {ok, [{application, AppName, AppData}]} = file:consult(DotAppSrc),
@@ -198,7 +197,7 @@ view_doc_root(ViewPath) ->
         end, "", 
         [boss_files:web_view_path(), boss_files:mail_view_path()]).
 
-compile_view_dir_erlydtl(Application, LibPath, Module, OutDir, TranslatorPid) ->
+compile_view_dir_erlydtl(Application, LibPath, Module, OutDir, TranslatorConfig) ->
     TagHelpers = lists:map(fun erlang:list_to_atom/1, boss_files:view_tag_helper_list(Application)),
     FilterHelpers = lists:map(fun erlang:list_to_atom/1, boss_files:view_filter_helper_list(Application)),
     ExtraTagHelpers = boss_env:get_env(template_tag_modules, []),
@@ -208,7 +207,7 @@ compile_view_dir_erlydtl(Application, LibPath, Module, OutDir, TranslatorPid) ->
             {custom_tags_modules, TagHelpers ++ ExtraTagHelpers ++ [boss_erlydtl_tags]},
             {custom_filters_modules, FilterHelpers ++ ExtraFilterHelpers},
             {blocktrans_fun, fun(BlockString, Locale) ->
-                    case boss_translator:lookup(TranslatorPid, BlockString, Locale) of
+                    case boss_translator:lookup(TranslatorConfig, BlockString, Locale) of
                         undefined -> default;
                         Body -> list_to_binary(Body)
                     end
@@ -218,7 +217,7 @@ compile_view_dir_erlydtl(Application, LibPath, Module, OutDir, TranslatorPid) ->
         Err -> Err
     end.
 
-compile_view(Application, ViewPath, TemplateAdapter, OutDir, TranslatorPid) ->
+compile_view(Application, ViewPath, TemplateAdapter, OutDir, TranslatorConfig) ->
     case file:read_file_info(ViewPath) of
         {ok, _} ->
             Module = view_module(Application, ViewPath),
@@ -232,7 +231,7 @@ compile_view(Application, ViewPath, TemplateAdapter, OutDir, TranslatorPid) ->
             TemplateAdapter:compile_file(ViewPath, Module, [
                     {out_dir, OutDir}, 
                     {doc_root, DocRoot},
-                    {translator_pid, TranslatorPid},
+                    {translator_config, TranslatorConfig},
                     {helper_module, HelperDirModule},
                     {tag_helpers, TagHelpers},
                     {filter_helpers, FilterHelpers},
@@ -266,13 +265,13 @@ compile(ModulePath, OutDir) ->
             boss_elixir_compiler:compile(ModulePath, [{out_dir, OutDir}])
     end.
 
-load_view_lib(Application, OutDir, TranslatorPid) ->
+load_view_lib(Application, OutDir, TranslatorConfig) ->
     {ok, HelperDirModule} = compile_view_dir_erlydtl(Application,
         boss_files:view_html_tags_path(), view_custom_tags_dir_module(Application), 
-        OutDir, TranslatorPid),
+        OutDir, TranslatorConfig),
     {ok, [HelperDirModule]}.
 
-load_view_lib_if_old(Application, TranslatorPid) ->
+load_view_lib_if_old(Application, TranslatorConfig) ->
     HelperDirModule = view_custom_tags_dir_module(Application),
     DirNeedsCompile = case module_is_loaded(HelperDirModule) of
         true ->
@@ -285,22 +284,22 @@ load_view_lib_if_old(Application, TranslatorPid) ->
     end,
     case DirNeedsCompile of
         true ->
-            load_view_lib(Application, undefined, TranslatorPid);
+            load_view_lib(Application, undefined, TranslatorConfig);
         false ->
             {ok, [HelperDirModule]}
     end.
 
-load_views(Application, OutDir, TranslatorPid) ->
+load_views(Application, OutDir, TranslatorConfig) ->
     ModuleList = lists:foldr(fun(Path, Acc) -> 
                 TemplateAdapter = boss_files:template_adapter_for_extension(
                     filename:extension(Path)),
-                {ok, Module} = compile_view(Application, Path, TemplateAdapter, OutDir, TranslatorPid),
+                {ok, Module} = compile_view(Application, Path, TemplateAdapter, OutDir, TranslatorConfig),
                 [Module|Acc]
         end, [], boss_files:view_file_list()),
     {ok, ModuleList}.
 
-load_view_if_old(Application, ViewPath, Module, TemplateAdapter, TranslatorPid) ->
-    case load_view_lib_if_old(Application, TranslatorPid) of
+load_view_if_old(Application, ViewPath, Module, TemplateAdapter, TranslatorConfig) ->
+    case load_view_lib_if_old(Application, TranslatorConfig) of
         {ok, _} -> 
             NeedCompile = case module_is_loaded(Module) of
                 true ->
@@ -320,7 +319,7 @@ load_view_if_old(Application, ViewPath, Module, TemplateAdapter, TranslatorPid) 
             case NeedCompile of
                 true ->
                     compile_view(Application, ViewPath, TemplateAdapter, 
-                        undefined, TranslatorPid);
+                        undefined, TranslatorConfig);
                 false ->
                     {ok, Module}
             end;
@@ -328,11 +327,11 @@ load_view_if_old(Application, ViewPath, Module, TemplateAdapter, TranslatorPid) 
             Err
     end.
 
-load_view_if_dev(Application, ViewPath, TranslatorPid) ->
+load_view_if_dev(Application, ViewPath, TranslatorConfig) ->
     Module = view_module(Application, ViewPath),
     TemplateAdapter = boss_files:template_adapter_for_extension(filename:extension(ViewPath)),
     Result = case boss_env:is_developing_app(Application) of
-        true -> load_view_if_old(Application, ViewPath, Module, TemplateAdapter, TranslatorPid);
+        true -> load_view_if_old(Application, ViewPath, Module, TemplateAdapter, TranslatorConfig);
         false -> {ok, Module}
     end,
     case Result of
